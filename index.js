@@ -15,8 +15,8 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(
     cors({
-        origin:"https://pinkheart-f.vercel.app",
-        // origin: "https://www.royasow.store",//مال الفرونت اند
+        // origin:"https://pinkheart-f.vercel.app",
+        origin: "http://localhost:5173",//مال الفرونت اند
         credentials: true,
     })
 );

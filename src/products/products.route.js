@@ -5,7 +5,7 @@ const verifyToken = require("../middleware/verifyToken");
 const verifyAdmin = require("../middleware/verifyAdmin");
 const router = express.Router();
 
-// post a product
+// رفع الصور
 const { uploadImages } = require("../utils/uploadImage");
 
 router.post("/uploadImages", async (req, res) => {
@@ -23,73 +23,76 @@ router.post("/uploadImages", async (req, res) => {
     }
 });
 
-// نقطة النهاية لإنشاء منتج
+// إنشاء منتج جديد
 router.post("/create-product", async (req, res) => {
   try {
-    const { name, category, description, price, oldPrice, image, color, author } = req.body;
+    const { name, category, subCategory, description, price, image, author } = req.body;
 
-    // تحقق من الحقول المطلوبة
-    if (!name || !category || !description || !price || !image || !author) {
+    // التحقق من الحقول المطلوبة
+    if (!name || !category || !subCategory || !description || !price || !image || !author) {
       return res.status(400).send({ message: "جميع الحقول المطلوبة يجب إرسالها" });
+    }
+
+    // التحقق من أن السعر رقم موجب
+    if (isNaN(price) || parseFloat(price) <= 0) {
+      return res.status(400).send({ message: "السعر يجب أن يكون رقمًا موجبًا" });
+    }
+
+    // التحقق من أن الصور هي مصفوفة
+    if (!Array.isArray(image)) {
+      return res.status(400).send({ message: "حقل الصور يجب أن يكون مصفوفة" });
     }
 
     const newProduct = new Products({
       name,
       category,
+      subCategory,
       description,
-      price,
-      oldPrice,
-      image, // يجب أن تكون مصفوفة من روابط الصور
-      color,
+      price: parseFloat(price),
+      image,
       author,
     });
 
     const savedProduct = await newProduct.save();
-
-    // حساب التقييمات إذا وجدت
-    const reviews = await Reviews.find({ productId: savedProduct._id });
-    if (reviews.length > 0) {
-      const totalRating = reviews.reduce((acc, review) => acc + review.rating, 0);
-      const averageRating = totalRating / reviews.length;
-      savedProduct.rating = averageRating;
-      await savedProduct.save();
-    }
-
     res.status(201).send(savedProduct);
+
   } catch (error) {
     console.error("Error creating new product", error);
-    res.status(500).send({ message: "Failed to create new product" });
+    res.status(500).send({ 
+      message: "فشل إنشاء المنتج",
+      error: error.message 
+    });
   }
 });
 
-// get all products
+// الحصول على جميع المنتجات
+// ... (بقية الاستيرادات كما هي)
+
 router.get("/", async (req, res) => {
   try {
     const {
       category,
-      color,
-      minPrice,
-      maxPrice,
+      subCategory,
+      brand,
       page = 1,
       limit = 10,
     } = req.query;
 
     const filter = {};
 
-    if (category && category !== "all") {
+    // فلترة حسب الفئة الرئيسية إذا كانت محددة وليست 'كل المنتجات'
+    if (category && category !== "كل المنتجات") {
       filter.category = category;
     }
 
-    if (color && color !== "all") {
-      filter.color = color;
+    // فلترة حسب الفئة الفرعية إذا كانت محددة
+    if (subCategory) {
+      filter.subCategory = subCategory;
     }
 
-    if (minPrice && maxPrice) {
-      const min = parseFloat(minPrice);
-      const max = parseFloat(maxPrice);
-      if (!isNaN(min) && !isNaN(max)) {
-        filter.price = { $gte: min, $lte: max };
-      }
+    // فلترة حسب العلامة التجارية إذا كانت محددة
+    if (brand) {
+      filter.brand = brand;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -105,11 +108,12 @@ router.get("/", async (req, res) => {
     res.status(200).send({ products, totalPages, totalProducts });
   } catch (error) {
     console.error("Error fetching products:", error);
-    res.status(500).send({ message: "Failed to fetch products" });
+    res.status(500).send({ message: "فشل جلب المنتجات" });
   }
 });
 
-//   get single Product
+
+// الحصول على منتج واحد
 router.get("/:id", async (req, res) => {
   try {
     const productId = req.params.id;
@@ -118,7 +122,7 @@ router.get("/:id", async (req, res) => {
       "email username"
     );
     if (!product) {
-      return res.status(404).send({ message: "Product not found" });
+      return res.status(404).send({ message: "المنتج غير موجود" });
     }
     const reviews = await Reviews.find({ productId }).populate(
       "userId",
@@ -127,68 +131,86 @@ router.get("/:id", async (req, res) => {
     res.status(200).send({ product, reviews });
   } catch (error) {
     console.error("Error fetching the product", error);
-    res.status(500).send({ message: "Failed to fetch the product" });
+    res.status(500).send({ message: "فشل جلب المنتج" });
   }
 });
 
-// update a product
-router.patch("/update-product/:id", verifyToken, verifyAdmin, async (req, res) => {
-  try {
-    const productId = req.params.id;
-    const updatedProduct = await Products.findByIdAndUpdate(
-      productId,
-      { ...req.body },
-      { new: true }
-    );
+// تحديث المنتج
+const multer = require('multer');
+const upload = multer();
+router.patch("/update-product/:id", 
+  verifyToken, 
+  verifyAdmin, 
+  upload.single('image'), // معالجة تحميل الصورة
+  async (req, res) => {
+    try {
+      const productId = req.params.id;
+      const updateData = {
+        ...req.body,
+        author: req.body.author
+      };
 
-    if (!updatedProduct) {
-      return res.status(404).send({ message: "Product not found" });
+      if (req.file) {
+        updateData.image = [req.file.path]; // أو أي طريقة تخزين تستخدمها للصور
+      }
+
+      const updatedProduct = await Products.findByIdAndUpdate(
+        productId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+      );
+
+      if (!updatedProduct) {
+        return res.status(404).send({ message: "المنتج غير موجود" });
+      }
+
+      res.status(200).send({
+        message: "تم تحديث المنتج بنجاح",
+        product: updatedProduct,
+      });
+    } catch (error) {
+      console.error("Error updating the product", error);
+      res.status(500).send({ 
+        message: "فشل تحديث المنتج",
+        error: error.message
+      });
     }
-
-    res.status(200).send({
-      message: "Product updated successfully",
-      product: updatedProduct,
-    });
-  } catch (error) {
-    console.error("Error updating the product", error);
-    res.status(500).send({ message: "Failed to update the product" });
   }
-});
+);
 
-// delete a product
-
+// حذف المنتج
 router.delete("/:id", async (req, res) => {
   try {
     const productId = req.params.id;
     const deletedProduct = await Products.findByIdAndDelete(productId);
 
     if (!deletedProduct) {
-      return res.status(404).send({ message: "Product not found" });
+      return res.status(404).send({ message: "المنتج غير موجود" });
     }
 
-    // delete reviews related to the product
+    // حذف التقييمات المرتبطة بالمنتج
     await Reviews.deleteMany({ productId: productId });
 
     res.status(200).send({
-      message: "Product deleted successfully",
+      message: "تم حذف المنتج بنجاح",
     });
   } catch (error) {
     console.error("Error deleting the product", error);
-    res.status(500).send({ message: "Failed to delete the product" });
+    res.status(500).send({ message: "فشل حذف المنتج" });
   }
 });
 
-// get related products
+// الحصول على منتجات ذات صلة
 router.get("/related/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!id) {
-      return res.status(400).send({ message: "Product ID is required" });
+      return res.status(400).send({ message: "معرف المنتج مطلوب" });
     }
     const product = await Products.findById(id);
     if (!product) {
-      return res.status(404).send({ message: "Product not found" });
+      return res.status(404).send({ message: "المنتج غير موجود" });
     }
 
     const titleRegex = new RegExp(
@@ -200,10 +222,10 @@ router.get("/related/:id", async (req, res) => {
     );
 
     const relatedProducts = await Products.find({
-      _id: { $ne: id }, // Exclude the current product
+      _id: { $ne: id }, // استبعاد المنتج الحالي
       $or: [
-        { name: { $regex: titleRegex } }, // Match similar names
-        { category: product.category }, // Match the same category
+        { name: { $regex: titleRegex } }, // مطابقة الأسماء المتشابهة
+        { category: product.category }, // مطابقة نفس الفئة
       ],
     });
 
@@ -211,7 +233,7 @@ router.get("/related/:id", async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching the related products", error);
-    res.status(500).send({ message: "Failed to fetch related products" });
+    res.status(500).send({ message: "فشل جلب المنتجات ذات الصلة" });
   }
 });
 
