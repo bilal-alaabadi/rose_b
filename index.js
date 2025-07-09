@@ -16,7 +16,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(
     cors({
         // origin:"https://pinkheart-f.vercel.app",
-        origin: "https://glassy-f.vercel.app",//مال الفرونت اند
+        origin: "http://localhost:5173",//مال الفرونت اند
         credentials: true,
     })
 );
