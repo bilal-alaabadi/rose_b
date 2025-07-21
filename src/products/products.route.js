@@ -112,7 +112,48 @@ router.get("/", async (req, res) => {
   }
 });
 
+// إضافة هذا المسار في ملف routes الخاص بك
+// في ملف routes/products.js أو مشابه
+router.get("/search", async (req, res) => {
+  try {
+    const query = req.query.q;
+    if (!query || query.trim() === '') {
+      return res.status(400).json({ 
+        success: false,
+        message: "يجب تقديم استعلام بحث صالح" 
+      });
+    }
 
+    const products = await Products.find({
+      $or: [
+        { name: { $regex: query, $options: 'i' } },
+        { description: { $regex: query, $options: 'i' } },
+        { 'category.name': { $regex: query, $options: 'i' } }
+      ]
+    }).limit(50);
+
+    if (!products || products.length === 0) {
+      return res.status(404).json({
+        success: true,
+        products: [],
+        message: "لا توجد نتائج للبحث"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      products,
+      count: products.length
+    });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "حدث خطأ أثناء البحث",
+      error: error.message 
+    });
+  }
+});
 // الحصول على منتج واحد
 router.get("/:id", async (req, res) => {
   try {
